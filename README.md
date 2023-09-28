@@ -1,0 +1,2 @@
+# StreamSignatuR
+Modelling stream signatures
