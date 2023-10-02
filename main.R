@@ -20,6 +20,7 @@ p2 <- tm_shape(r3)+
   tm_raster(legend.show = F, palette = "-OrRd" ) 
 p2
 
+
 tmap::tmap_save(p2, file="figures/example.png", width=8, height=10.5, units="cm", dpi=300)
 
 
