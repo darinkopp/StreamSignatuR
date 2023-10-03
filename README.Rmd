@@ -1,0 +1,121 @@
+---
+output:
+  github_document:
+    html_preview: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE,
+	fig.height=4
+)
+library(terra)
+library(tmap)
+
+source("R/functions.R")
+```
+
+## StreamSignatuR
+
+The file [R/functions.R](R/functions.R) contains the code for the StreamSignature() function
+and auxiliary functions required.
+
+The following examples show how to use the function. The R code in this markdown document is also saved as a simple R script [main.R](main.R)
+
+
+<br>
+
+<br>
+*... more documentation required ...*
+<br>
+
+<br>
+
+
+#### Read input data
+
+Load stream raster.
+```{r load stream raster}
+r <- rast("data/stream_upstr_basin.tif")
+```
+
+Load stream flux raster.
+```{r load stream flux}
+rf <- rast("data/StreamFlux.tif")
+```
+
+Load fractional composition of benthic organism groups.
+```{r load organism groups}
+rc <- rast("data/Benthic_Composition.tif")
+```
+
+#### Calculate Stream signatures
+
+Calculate stream signature using only stream raster.
+```{r}
+r2 <-StreamSignature(r)
+```
+
+Calculate stream signature using a flux raster.
+```{r}
+r3 <-StreamSignature(r, rf)
+```
+
+
+Calculate stream signature using a flux raster and a benthic composition raster.
+```{r}
+r4 <-StreamSignature(r, rf, rc)
+tm_shape(r4)+
+  tm_raster(legend.show = F, palette = "-OrRd" ) 
+```
+
+Benthic composition can also be supplied as a spatially-invariant list.
+```{r}
+rclist <- list(E=0.25,P=0.25,T=0.25,C=0.25)
+r5 <-StreamSignature(r, rf, rclist)
+```
+
+The StreamSignature function gives a warning if the sums of organism group composition fractions are not equal to 1.0. By default, calculations will continue anyway. In this case, the weighted signatures will be normalised to the sum of fractions i.e. each original fraction is effectively replaced by its fraction of the sum of fractions 
+
+$f_{normalised} = f / \sum_{1}^{n} f_i$
+
+There is an option to cause an error and stop processing if the sums of 
+organism group fractions are not equal to 1.0.
+
+```{r message=TRUE, warning=TRUE}
+rclist <- list(E=0.25,P=0.25,T=0.25,C=0.27)
+r6 <-StreamSignature(r, rf, rclist, options=list(check_composition_sums=T))
+```
+
+As you can see, the function returns the dataframe with all combinations
+of stream cells and matching land cells, along with the corresponding values
+of flux and benthic composition fractions.
+
+```{r message=TRUE, warning=TRUE}
+print(head(r6))
+```
+
+The function will only recognise benthic group fractions specified using
+the following names: A, C, E, P, T 
+
+* A - All aquatic insects
+* C - Chironomids
+* E - Mayflies
+* P - Stoneflies
+* T - Caddisflies
+
+```{r message=TRUE, warning=TRUE}
+rclist <- list(E=0.25,P=0.25,T=0.25,X=0.25)
+r7 <-StreamSignature(r, rf, rclist)
+```
+
+Note that in this case, the group "X" is not recognized.
+
+So the weighting for each of the remaining 3 groups becomes:
+
+ 0.25 / (0.25 + 0.25 + 0.25) = *0.333*
+
+
+

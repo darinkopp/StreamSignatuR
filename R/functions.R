@@ -171,17 +171,35 @@ ss_parameters <- function(method="Dispersal",
 #'  
 #' @param r raster
 #' @param rf raster of flux values
+#' @param rc species composition fractions
+#'           can be supplied as a raster of organism group fractions
+#'           or as a list of spatially invariant values
 #' @param radius_m maximum distance for matching land and stream cells 
-#' @param signature_model_options a list of options 
+#' @param options a list of options 
 #' @returns raster of stream signatures of same dimensions as r
 #' @examples
-#' StreamSignature(r, 1000)
+#' StreamSignature(r, radius_m=1000)
+#' StreamSignature(r, rc=list(E=0.25,P=0.25,Tr=0.25,C=0.25)
 #' 
-StreamSignature <- function(r, rf, radius_m=1000, signature_model_options=list()){
+StreamSignature <- function(r, rf, rc=NULL, radius_m=1000, options=list()){
   require(terra)
   require(dplyr)
   require(tidyr)
   require(fuzzyjoin)
+  
+  # option to cause an error and stop processing if any of the 
+  # sums of composition fractions are not equal to 1.0 
+  check_composition_sums <- FALSE
+  
+  if("check_composition_sums" %in% names(options)){
+    check_composition_sums <- options[["check_composition_sums"]]
+  }
+
+  org_list <- list(A="All aquatic insects",
+                   E="Mayflies", 
+                   P="Stoneflies",
+                   T="Caddisflies",
+                   C="Chironomids")
   
   # assign 0 values to replace NA (land cells)
   r[is.na(r)] <- 0
@@ -193,7 +211,7 @@ StreamSignature <- function(r, rf, radius_m=1000, signature_model_options=list()
     rf <- r
     values(rf)[,1] <- 1
   }
-  # create a dataframe from the raster
+  # create a data frame from the raster
   # starting with the cell coordinates
   xy <- terra::crds(r)
   dfRaster <- data.frame(xy) 
@@ -211,18 +229,66 @@ StreamSignature <- function(r, rf, radius_m=1000, signature_model_options=list()
   cell <- terra::cellFromXY(r,xy)
   dfRaster$cell <- cell
   
+  # if organism fractional composition supplied
+  if(!is.null(rc)){
+    if(typeof(rc)=="S4"){
+      # if organism composition is supplied as raster
+      # then add composition to data frame
+      
+      name_match <- names(rc)[names(rc) %in% names(org_list)]
+      
+      if(length(name_match)<length(names(rc))){
+        msg <- paste0("The composition raster contained ",
+                      length(names(rc)), " layers: ",
+                      paste0(names(rc),collapse=", "),"\n",
+                      "Only the following layer(s) were recognized: ",
+                      paste0(name_match,collapse=", "),"\n")
+                      
+        warning(msg, call.=F)
+      }
+      rc <- rc[[name_match]]
+      comp <- terra::values(rc)
+      dfRaster <- data.frame(dfRaster,comp)
+      
+      # get names of layers
+      org_layers <- names(rc)
+      
+    }else if(typeof(rc)=="list"){
+      # organism fractions supplied as a spatially invariant
+      # e.g. rc = list(E=0.5, P=0.5)
+      
+      # take only items from the list of organism groups
+      name_match <- names(rc)[names(rc) %in% names(org_list)]
+      if(length(name_match)<length(names(rc))){
+        msg <- paste0("The composition list contained ",
+                      length(names(rc)), " values: ",
+                      paste0(names(rc),collapse=", "),"\n",
+                      "Only the following names were recognized: ",
+                      paste0(name_match,collapse=", "),"\n")
+        warning(msg, call.=F)
+      }      
+      rc <- rc[name_match]
+      for(i in 1:length(rc)){
+        dfRaster[,names(rc)[i]] <- rc[[i]]
+      }
+      org_layers <- names(rc)
+    }else{
+      stop ("Organism composition fractions must be supplied as a raster or a list")
+    }
+    
+  }
+  
   # get a subset of dataframe for land cells
   dfLand <- dfRaster %>%
     dplyr::filter(val==0) %>%
-    dplyr::select(-val) %>%
-    dplyr::select(-flux) %>%
-    rename(cellLand=cell, lon=x, lat=y)
+    dplyr::select(cellLand=cell, lon=x, lat=y)
   
   # get a subset of dataframe for stream cells
   dfStream <- dfRaster %>%
     dplyr::filter(val==1) %>%
     dplyr::select(-val) %>%
     rename(cellStream=cell,lonS=x,latS=y)
+  
   
   # use fuzzy join to find distances between land and stream cells
   # creates a dataframe with one row for each combination of land cell and stream cell
@@ -234,14 +300,59 @@ StreamSignature <- function(r, rf, radius_m=1000, signature_model_options=list()
                              unit="km", 
                              distance_col = "d_km")
   
+  # if no organism information is supplied use the "All" 
+  if(is.null(rc)){
+    org_list <- org_list["A"]
+    df <- df %>%
+      mutate(OrgGroup="A", fraction=1, OrgGroupName="All aquatic insects")
+  }else{
+    # pivot longer so that there is one row per organism fraction
+    df <- df %>%
+      pivot_longer(cols=all_of(org_layers), names_to="OrgGroup", values_to="fraction")
+    
+    org_list <- list(E="Mayflies", P="Stoneflies", T="Caddisflies", C="Chironomids")
+    df <- df %>%
+      mutate(OrgGroupName=org_list[OrgGroup])
+    
+    df$OrgGroupName <- unlist(org_list[df$OrgGroup])
+  }
+
+  # check that organism fractions sum to 1.0
+  res <- .check_composition_sums(df, stop_on_error=check_composition_sums)
+  msg <- res[2]
+  if(res[1]==T){
+    msg <- paste0(msg, "Stopping processing and returning the dataframe of cell values\n")
+    warning(msg, call.=F)
+    return(df)
+  }
+  if(msg!="") warning(msg, call.=F)
   
-  # obtain parameters for ss function
-  # this example uses a single pair of parameters - over all cells
-  params_ss <- ss_parameters()
+  # calling ss_parameters for each row of the dataframe could be very slow
+  # so we will retrieve them only for unique combinations of method, organism, etc.
+  # right now we only have varying organism compositions
+  # this can be expanded on for productivity, slope, others??
+  ss_params <- lapply(org_list, ss_parameters, method="Dispersal")
   
-  # calculate response for each combination of land cell and stream cell
+  # from our list of unique parameter values, apply
+  # the correct parameter pair to each row of df, based on the organism
+  df$params <- ss_params[df$OrgGroup]
+  
+  # calculate weighted organism group contributions for each
+  # unique combination of land cell, stream cell and organism group. 
   df <- df %>%
-    mutate(s=ss(d_km*1000, params=params_ss))
+    rowwise() %>%
+    mutate(s=fraction*ss(d_km*1000, params=params)/sum(fraction,na.rm=T)) %>%
+    ungroup()
+  
+  
+  # Calculate the sums of weighted organism contributions in 
+  # each land/stream cell combination 
+  df <- df %>%
+    group_by(cellLand, cellStream, flux) %>%
+    summarise(s=sum(s,na.rm=T),.groups="drop")
+  
+  # Idea for future development?
+  # we could something here with summing separate contributions from each organism?
   
   # normalise the signatures so that the sum for each stream cell is 1.0
   df <- df %>%
@@ -249,8 +360,7 @@ StreamSignature <- function(r, rf, radius_m=1000, signature_model_options=list()
     mutate(s_norm=s/(sum(s,na.rm=T))) %>%
     ungroup()
   
-  
-  # sum the response for each 
+  # for each land cell, sum the response multiplied by flux from stream cells
   df <- df %>%
     group_by(cellLand) %>%
     summarise(s=sum(s_norm*flux,na.rm=T),.groups="drop") 
@@ -297,4 +407,33 @@ StreamSignature <- function(r, rf, radius_m=1000, signature_model_options=list()
   s <- paste0(s,"*organism:      ",a_organism," (", organism ,")\n")
   s <- paste0(s,"*productivity:  ",a_productivity," (", productivity ,")\n")
   return(s)
+}
+
+
+# ---------------------------------------------------------------------
+#' auxiliary function check if the sum of organism composition
+#' fractions in each grid cell is equal to 1.0
+#' Because of rounding errors at the 8th decimal
+#' it is never a good idea to test "==" for 
+#' floating point numbers so we need a tolerance value
+#' 
+.check_composition_sums<- function(df, tolerance=1e-7, stop_on_error=F){
+  stop_processing <- T
+  df <- df %>% 
+    distinct(cellStream,OrgGroup,fraction) %>%
+    filter(!is.na(cellStream)) %>%
+    group_by(cellStream) %>%
+    summarise(comp_sum=sum(fraction,na.rm=T),.groups="drop") %>%
+    filter(comp_sum<(1-tolerance) | comp_sum>(1+tolerance))
+  
+  # count the cells where sum != 1.0
+  n <- nrow(df)
+  
+  stop_processing <- ifelse(n==0,F,stop_processing)
+  stop_processing <- ifelse(stop_on_error,stop_processing,F)
+
+  msg <- paste0("For ", n,
+                " river cells, the sum of organism composition fractions was not equal to 1.0\n")
+  msg <- ifelse(n==0,"",msg)
+  return(list(stop_processing,msg))
 }
