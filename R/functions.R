@@ -198,7 +198,7 @@ StreamSignature <- function(r, rf, rc=NULL, radius_m=1000, options=list()){
   org_list <- list(A="All aquatic insects",
                    E="Mayflies", 
                    P="Stoneflies",
-                   T="Caddisflies",
+                   Tr="Caddisflies",
                    C="Chironomids")
   
   # assign 0 values to replace NA (land cells)
@@ -209,24 +209,24 @@ StreamSignature <- function(r, rf, rc=NULL, radius_m=1000, options=list()){
   
   if(missing(rf)){
     rf <- r
-    values(rf)[,1] <- 1
+    values(rf) <- 1
   }
+  
   # create a data frame from the raster
   # starting with the cell coordinates
   xy <- terra::crds(r)
   dfRaster <- data.frame(xy) 
   
   # add the cell values to the dataframe
-  val<- terra::values(r)[,1]
-  val<-ifelse(is.na(val),0,val)
+  val <- terra::values(r)[,1]
+  val <- ifelse(is.na(val), 0, val)
   dfRaster$val <- val
   
   flux <- terra::values(rf)[,1]
   dfRaster$flux <- flux
   
-  
   # add the cell number to the dataframe
-  cell <- terra::cellFromXY(r,xy)
+  cell <- terra::cellFromXY(r, xy)
   dfRaster$cell <- cell
   
   # if organism fractional composition supplied
@@ -259,7 +259,7 @@ StreamSignature <- function(r, rf, rc=NULL, radius_m=1000, options=list()){
       
       # take only items from the list of organism groups
       name_match <- names(rc)[names(rc) %in% names(org_list)]
-      if(length(name_match)<length(names(rc))){
+      if(length(name_match) < length(names(rc))){
         msg <- paste0("The composition list contained ",
                       length(names(rc)), " values: ",
                       paste0(names(rc),collapse=", "),"\n",
@@ -275,12 +275,11 @@ StreamSignature <- function(r, rf, rc=NULL, radius_m=1000, options=list()){
     }else{
       stop ("Organism composition fractions must be supplied as a raster or a list")
     }
-    
   }
   
   # get a subset of dataframe for land cells
   dfLand <- dfRaster %>%
-    dplyr::filter(val==0) %>%
+    #dplyr::filter(val==0) %>%
     dplyr::select(cellLand=cell, lon=x, lat=y)
   
   # get a subset of dataframe for stream cells
@@ -300,6 +299,9 @@ StreamSignature <- function(r, rf, rc=NULL, radius_m=1000, options=list()){
                              unit="km", 
                              distance_col = "d_km")
   
+  # add 1m to account for deposition at the shoreline. 
+  df[!is.na(df$cellStream)&df$cellStream==df$cellLand,"d_km"]<-1/1000
+  
   # if no organism information is supplied use the "All" 
   if(is.null(rc)){
     org_list <- org_list["A"]
@@ -310,7 +312,7 @@ StreamSignature <- function(r, rf, rc=NULL, radius_m=1000, options=list()){
     df <- df %>%
       pivot_longer(cols=all_of(org_layers), names_to="OrgGroup", values_to="fraction")
     
-    org_list <- list(E="Mayflies", P="Stoneflies", T="Caddisflies", C="Chironomids")
+    org_list <- list(E="Mayflies", P="Stoneflies", Tr="Caddisflies", C="Chironomids")
     df <- df %>%
       mutate(OrgGroupName=org_list[OrgGroup])
     
@@ -344,12 +346,11 @@ StreamSignature <- function(r, rf, rc=NULL, radius_m=1000, options=list()){
     mutate(s=fraction*ss(d_km*1000, params=params)/sum(fraction,na.rm=T)) %>%
     ungroup()
   
-  
   # Calculate the sums of weighted organism contributions in 
   # each land/stream cell combination 
   df <- df %>%
     group_by(cellLand, cellStream, flux) %>%
-    summarise(s=sum(s,na.rm=T),.groups="drop")
+    summarise(s=sum(s,na.rm=T), .groups="drop")
   
   # Idea for future development?
   # we could something here with summing separate contributions from each organism?
