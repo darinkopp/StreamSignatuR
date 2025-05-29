@@ -1,9 +1,11 @@
 # a landscape analysis of aquatic terrestrial subsidies 
 rm(list = ls())
+library(fuzzyjoin)
 library(terra)
 library(stars)
 library(tmap)
 source("R/functions.R")
+library(remotes)
 library(StreamCatTools)
 library(nhdplusTools)
 
@@ -33,15 +35,12 @@ df <- df[df$HAS_WIDTH&!is.na(df$HAS_WIDTH),]
 # Download nhdplus files for network -- change 
 # blackfoot river 24479247; Andrews LTER 23773411 
 
-nldi_nwis <- list(featureSource = "nwissite", featureID = "USGS-05428500")
-
-
 for (site in (15:nrow(df))){
-  # site <- 15 
+  # site <- 1 
   
   site_code <- df[site, "siteCode"]
   start_comid <- as.numeric(df[site, "comids"])
-  
+  # start_comid <- 24479247
   ###########
   flowline <- navigate_nldi(list(featureSource = "comid", 
                                  featureID = start_comid), 
@@ -103,6 +102,8 @@ for (i in 1:nrow(meanVals)){
 sub_comids$flux <- 1.910
 ##################################
 
+# need vector of flowlines, attributed with wetted width and flux
+sub_comids <- sub_comids[,c("wettedwidth","flux")]
 
 # creating flux raster 
 ######
@@ -156,6 +157,8 @@ P2<-tm_shape(StrSig) +
   tm_lines(lwd=1.25, col = "blue")+
   tm_shape(ws)+
   tm_borders(lwd=1.5)
+tmap_mode("view")
+windows()
 P2
 
 tmap_save(P2, filename = "Export_DM_BlackfootR.jpeg", 
