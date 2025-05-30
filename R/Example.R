@@ -5,105 +5,9 @@ library(terra)
 library(stars)
 library(tmap)
 source("R/functions.R")
-library(remotes)
 library(StreamCatTools)
 library(nhdplusTools)
 
-# add NEON sites for example -- get_comid 
-# overloads API - only run once
-##########
-df <- read.csv("data/NEON-SiteMap-Table.csv") %>%
-  filter(!stateCode %in% c("AK", "PR"))
-
-comids <- sc_get_comid(df,
-             xcoord = "longitude", 
-             ycoord = "latitude", 
-             crsys = 4269) %>%
-  strsplit(",") %>%
-  unlist()
-
-df <- mutate(df, comids)%>%
-  filter(terrain=="AQUATIC")
-#####################################
-#dont overwrite. identified order and whether
-#streams were available
-
-#write.csv(df,"data/NEON_Aquatic.csv")
-df <- read.csv("data/NEON_Aquatic.csv")
-df <- df[df$HAS_WIDTH&!is.na(df$HAS_WIDTH),]
-
-# Download nhdplus files for network -- change 
-# blackfoot river 24479247; Andrews LTER 23773411 
-
-#for (site in (15:nrow(df))){
-  # site <- 1 
-  
-  site_code <- df[site, "siteCode"]
-  start_comid <- as.numeric(df[site, "comids"])
-  # start_comid <- 24479247
-  ###########
-  flowline <- navigate_nldi(list(featureSource = "comid", 
-                                 featureID = start_comid), 
-                            mode = "upstreamTributaries", 
-                            distance_km = 100)
-
-  subset_file <- tempfile(fileext = ".gpkg")
-
-  #subset_file <- file.path(paste0("data/neon/",site_code,".gpkg"))
-  subset <- subset_nhdplus(comids = as.integer(flowline$UT$nhdplus_comid),
-                           output_file = subset_file,
-                           nhdplus_data = "download", 
-                           flowline_only = FALSE,
-                           return_data = TRUE, 
-                           overwrite = TRUE)
-
-  flowline <- subset$NHDFlowline_Network
-  catchment <- subset$CatchmentSP
-  waterbody <- subset$NHDWaterbody
-  ########################################
-
-
-# reduce network to 50km upstream of starting COMID
-#########
-sub_comids <- get_UT(flowline, start_comid, distance = 50)
-sub_comids <- dplyr::filter(flowline, comid %in% sub_comids)
-
-catch <- get_nhdplus(comid = sub_comids$comid, 
-                     realization = "catchment")
-ws <- st_union(catch)
-#############################################
-
-# attribute COMIDs with wetted widths -- there can be missing vals(!?),
-# flux (gm2yr), or composition (EPTrC relative abundance) 
-######
-wwidth <- sub_comids$comid%>%
-  as.character()%>%
-  sc_get_data(metric = "WettedWidth",
-              aoi = "other")
-sub_comids <- merge(sub_comids, wwidth, by = "comid", all.x=T)
-
-# used stream order to assign mean wetted width 
-# for missing values. Need to investigate doyle for 
-# model predictions
-
-meanVals <- sub_comids %>%
-  st_set_geometry(NULL) %>%
-  group_by(streamorde) %>%
-  summarize(meanWW = mean(wettedwidth, na.rm = T))
-
-for (i in 1:nrow(meanVals)){
-  # i<-1
-  sub_comids[is.na(sub_comids$wettedwidth) &
-               sub_comids$streamorde == meanVals$streamorde[i],
-    "wettedwidth"] <- meanVals$meanWW[i]
-}
-
-# mgDM 1910; mgC 860; mgN 140; mgPUFA 20; mgP 10
-sub_comids$flux <- 1.910
-##################################
-
-# need vector of flowlines, attributed with wetted width and flux
-sub_comids <- sub_comids[,c("wettedwidth", "flux")]
 
 
 library(sf)
@@ -114,14 +18,18 @@ sub_comids <- eunet[,c("WIDTH_M","flux")]
 colnames(sub_comids)[1:2]<-c("wettedwidth", "flux")
 sub_comids<-st_transform(sub_comids, crs=4326)
 #write_sf(sub_comids, data/b)
+
+
+streamNet <- st_read("data/blackfootR_50.gpkg")
+
 # creating flux raster 
 ######
 #create raster template from watershed
 #bb <- st_bbox(ws)
-bb <- st_bbox(sub_comids)
+bb <- st_bbox(streamNet)
 tmpRas <- rast(xmin = bb$xmin - 0.01, xmax = bb$xmax + 0.01,
                ymin = bb$ymin - 0.01, ymax = bb$ymax + 0.01,
-               nrows = 200, ncols = 200)
+               nrows = 300, ncols = 300)
 
 v <- vect(sub_comids)
 
@@ -134,7 +42,8 @@ flux <- (l*w)*fx
 # flux raster
 flux[flux==0] <- NA
 
-# stream raster 
+# stream raster --- this is redundant and may not be needed
+# the flux raster is the stream raster... c
 l[l > 0] <- 1
 l[l ==0] <- NA
 ######################
@@ -150,10 +59,11 @@ l[l ==0] <- NA
 # to growing season or a min growing degree days to first freeze? 
 
 StrSig <- StreamSignature(r = l, rf = flux, radius_m = 1000)
-StrSig[StrSig==0]<-NA
+StrSig[StrSig==0] <- NA
 
 #save stream signature raster
-writeRaster(StrSig, filename = paste0("figures/StreamSignature_EUNet.tif"))
+writeRaster(StrSig, filename = paste0("figures/StreamSignature_blackfootR_50.tif"))
+
 windows()
 plot(StrSig)
 
