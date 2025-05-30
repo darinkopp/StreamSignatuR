@@ -106,15 +106,22 @@ sub_comids$flux <- 1.910
 sub_comids <- sub_comids[,c("wettedwidth", "flux")]
 
 
-
+library(sf)
+list.files("data/EU_Streams/reach_NETRACE_noce.shp")
+eunet <- read_sf("data/EU_Streams/reach_NETRACE_noce.shp")
+eunet$flux <- 1.910
+sub_comids <- eunet[,c("WIDTH_M","flux")]
+colnames(sub_comids)[1:2]<-c("wettedwidth", "flux")
+sub_comids<-st_transform(sub_comids, crs=4326)
 #write_sf(sub_comids, data/b)
 # creating flux raster 
 ######
 #create raster template from watershed
-bb <- st_bbox(ws)
+#bb <- st_bbox(ws)
+bb <- st_bbox(sub_comids)
 tmpRas <- rast(xmin = bb$xmin - 0.01, xmax = bb$xmax + 0.01,
                ymin = bb$ymin - 0.01, ymax = bb$ymax + 0.01,
-               nrows = 500, ncols = 500)
+               nrows = 200, ncols = 200)
 
 v <- vect(sub_comids)
 
@@ -146,8 +153,9 @@ StrSig <- StreamSignature(r = l, rf = flux, radius_m = 1000)
 StrSig[StrSig==0]<-NA
 
 #save stream signature raster
-writeRaster(StrSig, filename = paste0("Figure", site_code, ".tif"))
-
+writeRaster(StrSig, filename = paste0("figures/StreamSignature_EUNet.tif"))
+windows()
+plot(StrSig)
 
 
 
@@ -157,6 +165,9 @@ P1 <- tm_shape(sub_comids,bbox = st_bbox(StrSig))+
   tm_borders(lwd=1.5)+
   tm_layout(meta.margins = c(.2, 0, 0, 0))
 
+remove.packages("tmap")
+install.packages("tmap")
+plot(StrSig)
 P2 <- tm_shape(StrSig, bbox = st_bbox(StrSig)) +
   tm_raster(col.scale = tm_scale_continuous(values = terrain.colors(9)), 
             col.legend = tm_legend(title = "gDMyr"))+
