@@ -7,16 +7,14 @@ library(tmap)
 source("R/functions.R")
 library(StreamCatTools)
 library(nhdplusTools)
-
-
-
 library(sf)
-list.files("data/EU_Streams/reach_NETRACE_noce.shp")
+
+
 eunet <- read_sf("data/EU_Streams/reach_NETRACE_noce.shp")
 eunet$flux <- 1.910
 sub_comids <- eunet[,c("WIDTH_M","flux")]
 colnames(sub_comids)[1:2]<-c("wettedwidth", "flux")
-sub_comids<-st_transform(sub_comids, crs=4326)
+streamNet<-st_transform(sub_comids, crs=4326)
 #write_sf(sub_comids, data/b)
 
 
@@ -29,7 +27,7 @@ streamNet <- st_read("data/blackfootR_50.gpkg")
 bb <- st_bbox(streamNet)
 tmpRas <- rast(xmin = bb$xmin - 0.01, xmax = bb$xmax + 0.01,
                ymin = bb$ymin - 0.01, ymax = bb$ymax + 0.01,
-               nrows = 300, ncols = 300)
+               nrows = 400, ncols = 400)
 
 v <- vect(sub_comids)
 
@@ -62,7 +60,7 @@ StrSig <- StreamSignature(r = l, rf = flux, radius_m = 1000)
 StrSig[StrSig==0] <- NA
 
 #save stream signature raster
-writeRaster(StrSig, filename = paste0("figures/StreamSignature_blackfootR_50.tif"))
+writeRaster(StrSig, filename = paste0("figures/StreamSignature_EU.tif"))
 
 windows()
 plot(StrSig)
@@ -83,8 +81,8 @@ P2 <- tm_shape(StrSig, bbox = st_bbox(StrSig)) +
             col.legend = tm_legend(title = "gDMyr"))+
   tm_shape(sub_comids)+
   tm_lines(lwd=1.25, col = "blue")+
-  tm_shape(ws)+
-  tm_borders(lwd=1.5)+
+  # tm_shape(ws)+
+  # tm_borders(lwd=1.5)+
   tm_layout(meta.margins = c(.2, 0, 0, 0))
 
 tmap_arrange(P1, P2, sync = T)
