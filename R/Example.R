@@ -65,32 +65,36 @@ writeRaster(StrSig, filename = paste0("figures/StreamSignature_EU.tif"))
 windows()
 plot(StrSig)
 
+StrSig<-rast(paste0("figures/StreamSignature_EU.tif"))
 
 
-P1 <- tm_shape(sub_comids,bbox = st_bbox(StrSig))+
+P1 <- tm_shape(streamNet,bbox = st_bbox(StrSig))+
   tm_lines(lwd=1.25, col = "blue")+
   tm_shape(ws)+
   tm_borders(lwd=1.5)+
   tm_layout(meta.margins = c(.2, 0, 0, 0))
 
-remove.packages("tmap")
-install.packages("tmap")
+
 plot(StrSig)
 P2 <- tm_shape(StrSig, bbox = st_bbox(StrSig)) +
-  tm_raster(col.scale = tm_scale_continuous(values = terrain.colors(9)), 
+  tm_raster(col.scale = tm_scale_continuous(values = topo.colors(10, rev = T)), 
+            col_alpha = 0.75,
             col.legend = tm_legend(title = "gDMyr"))+
-  tm_shape(sub_comids)+
-  tm_lines(lwd=1.25, col = "blue")+
+  # tm_shape(streamNet)+
+  # tm_lines(lwd=1.25, col = "blue")+
   # tm_shape(ws)+
   # tm_borders(lwd=1.5)+
-  tm_layout(meta.margins = c(.2, 0, 0, 0))
+  tm_layout(meta.margins = c(.2, 0, 0, 0),
+            frame = FALSE)+
+  tm_basemap("OpenTopoMap")
 
+library("maptiles")
 tmap_arrange(P1, P2, sync = T)
 P2
-tmap_mode("view")
+tmap_mode("plot")
 windows()
 P2
-
+search()
 tmap_save(P2, filename = "Export_DM_BlackfootR.jpeg", 
           width=10,height=10, units = "in")
 P2
