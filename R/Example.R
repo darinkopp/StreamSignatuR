@@ -35,7 +35,7 @@ df <- df[df$HAS_WIDTH&!is.na(df$HAS_WIDTH),]
 # Download nhdplus files for network -- change 
 # blackfoot river 24479247; Andrews LTER 23773411 
 
-for (site in (15:nrow(df))){
+#for (site in (15:nrow(df))){
   # site <- 1 
   
   site_code <- df[site, "siteCode"]
@@ -103,15 +103,18 @@ sub_comids$flux <- 1.910
 ##################################
 
 # need vector of flowlines, attributed with wetted width and flux
-sub_comids <- sub_comids[,c("wettedwidth","flux")]
+sub_comids <- sub_comids[,c("wettedwidth", "flux")]
 
+
+
+#write_sf(sub_comids, data/b)
 # creating flux raster 
 ######
 #create raster template from watershed
 bb <- st_bbox(ws)
-tmpRas <- rast(xmin = bb$xmin, xmax = bb$xmax,
-               ymin = bb$ymin, ymax = bb$ymax,
-               nrows = 200, ncols = 200)
+tmpRas <- rast(xmin = bb$xmin - 0.01, xmax = bb$xmax + 0.01,
+               ymin = bb$ymin - 0.01, ymax = bb$ymax + 0.01,
+               nrows = 500, ncols = 500)
 
 v <- vect(sub_comids)
 
@@ -143,20 +146,28 @@ StrSig <- StreamSignature(r = l, rf = flux, radius_m = 1000)
 StrSig[StrSig==0]<-NA
 
 #save stream signature raster
-writeRaster(StrSig, filename = paste0("data/neon/SS_", site_code, ".tif"))
-}
+writeRaster(StrSig, filename = paste0("Figure", site_code, ".tif"))
 
-list.files()
-for i in 
 
-sum(values(StrSig),na.rm=T)/1000
 
-P2<-tm_shape(StrSig) +
-  tm_raster(n=8, title = "gDMyr")+
+
+P1 <- tm_shape(sub_comids,bbox = st_bbox(StrSig))+
+  tm_lines(lwd=1.25, col = "blue")+
+  tm_shape(ws)+
+  tm_borders(lwd=1.5)+
+  tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+P2 <- tm_shape(StrSig, bbox = st_bbox(StrSig)) +
+  tm_raster(col.scale = tm_scale_continuous(values = terrain.colors(9)), 
+            col.legend = tm_legend(title = "gDMyr"))+
   tm_shape(sub_comids)+
   tm_lines(lwd=1.25, col = "blue")+
   tm_shape(ws)+
-  tm_borders(lwd=1.5)
+  tm_borders(lwd=1.5)+
+  tm_layout(meta.margins = c(.2, 0, 0, 0))
+
+tmap_arrange(P1, P2, sync = T)
+P2
 tmap_mode("view")
 windows()
 P2
