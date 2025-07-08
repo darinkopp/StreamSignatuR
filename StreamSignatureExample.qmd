@@ -1,0 +1,240 @@
+---
+title: "StreamSignatureMapping"
+format: html
+editor: visual
+execute: 
+  message: false
+  warning: false
+---
+
+# Background:
+
+## Resource subsidies 
+
+Resource subsidies are resources that originate in one ecosystem and are then transported to another. The transport of resource across ecosystem boundaries can produce complex dynamics, ranging increased in-situ production, elevated population numbers, and altered predator-prey interactions. ![Examples of ecological resource subsidies](figures/General_Subsidies.gif)
+
+## Aquatic-Terrestrial Linkages 
+
+Terrestrial materials typically move down-slope from to aquatic ecosystems because of gravity and aquatic materials are transported by back to land by floods or biotic vectors. Emergent aquatic insects are a common vector that redistribute aquatic-borne materials to the terrestrial ecosystems.
+
+![Baxter et al 2005](figures/fwb_1328_f1.webp)
+
+In some cases, insects can also assimilate contaminants into their body tissues and can be harmful if they are consumed by terrestrial consumers.
+
+![Kraus et al 2021](figures/978-3-030-49480-3.webp){width="280"}
+
+## Stream Signature Concept
+
+The stream signature concept extends the width of streams to account for aquatic-terrestrial interactions. The stream siganture is the lateral distance that a percentage of aquatic derived resources observed at the waters edge extends into the terrestrial ecosystems. As an exponential distance-decay function it explicitly acknowledges that majority of material are consumed or deposited near the waters edge but a non-trivial amount (e.g. 10%) can travel up to 1km into terrestrial ecosystems.
+
+![Meuhlbauer et al 2014. The stream signature concept. ](/figures/Muehlbauer_StreamSignature.jpg)
+
+## The dendritic structure of networks  
+
+Stream networks are dendritic and aquatic insects can emerge from all reaches. If aquatic insect subsidies travel perpendicular to the stream, they well eventually overlap when two streams come in close proximity to one another. This could happen at meander bends and confluence junctions.
+
+![](figures/Sabo_ResourceExchange.jpg){fig-align="center"}
+
+# Application: Blackfoot River
+
+Mining activities in the watershed has released selenium into the river and can potentially cause harm to aquatic plants, invertebrates and fish. Idaho Department of Environmental Quality, USGS and EPA R10 are actively monitoring selenium concentrations in the water. Can we identify potential hotspots of selenium exposure on the landscape that occur because of emerging aquatic insects?
+
+## Extract and Attribute Stream Network
+
+```{r}
+#| message: false
+library(sf)
+library(StreamCatTools)
+library(nhdplusTools)
+library(tidyverse)
+library(tmap)
+
+```
+
+Download data
+
+```{r}
+
+start_comid <- 24479247
+flowline <- navigate_nldi(list(featureSource = "comid", 
+                               featureID = start_comid), 
+                          mode = "upstreamTributaries", 
+                          distance_km = 100)
+
+subset_file <- tempfile(fileext = ".gpkg")
+flowline$UT$nhdplus_comid <- as.integer(flowline$UT$nhdplus_comid)
+subset <- subset_nhdplus(comids = flowline$UT$nhdplus_comid,
+                         output_file = subset_file,
+                         nhdplus_data = "download", 
+                         flowline_only = FALSE,
+                         return_data = TRUE, 
+                         overwrite = TRUE) %>% 
+  suppressMessages()
+
+flowline <- subset$NHDFlowline_Network
+catchment <- subset$CatchmentSP
+waterbody <- subset$NHDWaterbody
+
+# reduce network to 50km upstream of starting COMID
+sub_comids <- get_UT(flowline, start_comid, distance = 50)
+sub_comids <- dplyr::filter(flowline, comid %in% sub_comids)
+
+catch <- get_nhdplus(comid = sub_comids$comid, 
+                     realization = "catchment")
+ws <- st_union(catch)
+
+```
+
+Add wetted width. Total emergence from a stream depends on the surface area of the stream
+
+```{r}
+# attribute COMIDs with wetted widths 
+wwidth <- sub_comids$comid%>%
+  as.character()%>%
+  sc_get_data(metric = "WettedWidth",
+              aoi = "other")
+
+sub_comids <- merge(sub_comids, 
+                    wwidth, 
+                    by = "comid", 
+                    all.x=T)
+
+
+# used stream order to assign mean wetted width 
+# for missing values (temporary fix). 
+
+meanVals <- sub_comids %>%
+  st_set_geometry(NULL) %>%
+  group_by(streamorde) %>%
+  summarize(meanWW = mean(wettedwidth, na.rm = T))
+
+for (i in 1:nrow(meanVals)){
+  # i<-1
+  sub_comids[is.na(sub_comids$wettedwidth) &
+               sub_comids$streamorde == meanVals$streamorde[i],
+             "wettedwidth"] <- meanVals$meanWW[i]
+}
+
+# flux m^2
+# mgDM 1910; mgC 860; mgN 140; mgPUFA 20; mgP 10
+sub_comids$flux <- 1.910
+
+# need vector of flowlines, attributed with wetted width and flux
+sub_comids <- sub_comids[,c("wettedwidth", "flux")]
+
+```
+
+make a map
+
+```{r}
+
+tmap_mode("view")
+tm_shape(sub_comids)+
+  tm_lines(col = "darkblue",
+    lwd = "wettedwidth", 
+           lwd.scale = tm_scale_continuous(
+                                          values.scale = c(5)))+
+  tm_shape(ws)+
+  tm_borders()+
+  tm_basemap("OpenTopoMap")
+
+```
+
+```{r}
+#st_write(sub_comids,"data/blackfootR_50.gpkg", layer="streamNetwork") #st_write(ws,"data/blackfootR_50.gpkg", layer="Catchment")
+```
+
+## Calculate stream signature
+
+To rasterize the stream signature calculation the stream network is converted to a raster and the pairwise distance separating a each stream pixel for all land pixels is calculated. The total flux reaching any given land pized is the summation of the emergence from all pixels within one km distance divided by the number of pixels.
+
+![](figures/ConceptualDiagram.jpg)
+
+```{r}
+library(fuzzyjoin)
+library(terra)
+library(stars)
+library(tmap)
+source("R/functions.R")
+```
+
+Create flux raster
+
+```{r}
+streamNet <- st_read("data/blackfootR_50.gpkg", 
+                     layer = "streamNetwork")
+Catchment <- st_read("data/blackfootR_50.gpkg", layer="Catchment")
+# Use raster template
+bb <- st_bbox(streamNet)
+tmpRas <- rast(xmin = bb$xmin - 0.01, xmax = bb$xmax + 0.01,
+               ymin = bb$ymin - 0.01, ymax = bb$ymax + 0.01,
+               nrows = 100, ncols = 100)
+
+v <- vect(streamNet)
+
+# calculate stream length within raster cell
+l <- rasterizeGeom(v, tmpRas, "length", "m")
+w <- rasterize(v, tmpRas, field = "wettedwidth")
+fx <- rasterize(v, tmpRas, field = "flux")
+flux <- (l*w) * fx
+
+# flux raster
+flux[flux==0] <- NA
+
+# stream raster --- this is redundant... but OK for now
+l[l > 0] <- 1
+l[l ==0] <- NA
+######################
+
+```
+
+Calculate stream signature
+
+```{r}
+StrSig <- StreamSignature(r = l, rf = flux, radius_m = 1000)
+StrSig[StrSig==0] <- NA
+StrSig <- StrSig/cellSize(tmpRas, unit = "m")*1000
+```
+
+```{r}
+tm_shape(StrSig, 
+         bbox = st_bbox(StrSig)) +
+  tm_raster(
+    col.scale = 
+      tm_scale_continuous(values = topo.colors(10, rev = T)), 
+    col_alpha = 0.75,
+    col.legend = tm_legend(title = "mgDM/yr/m2"))+
+   tm_shape(streamNet)+
+   tm_lines(lwd=1.25, col = "blue")+
+   tm_shape(Catchment)+
+   tm_borders(lwd=1.5)+
+  tm_layout(meta.margins = c(.2, 0, 0, 0),
+            frame = FALSE)+
+  tm_basemap("OpenTopoMap")
+
+```
+
+Higher resolution map for comparison
+
+```{r}
+StrSig <- rast("figures/StreamSignature_blackfootR_50.tif")
+StrSig <- StrSig/cellSize(StrSig, unit = "m")*1000
+
+tm_shape(StrSig, 
+         bbox = st_bbox(StrSig)) +
+  tm_raster(
+    col.scale = 
+      tm_scale_continuous(values = topo.colors(10, rev = T)), 
+    col_alpha = 0.75,
+    col.legend = tm_legend(title = "mgDM/yr/m2"))+
+   tm_shape(streamNet)+
+   tm_lines(lwd=1.25, col = "blue")+
+   tm_shape(Catchment)+
+   tm_borders(lwd=1.5)+
+  tm_layout(meta.margins = c(.2, 0, 0, 0),
+            frame = FALSE)+
+  tm_basemap("OpenTopoMap")
+
+```
+
+Next steps: Selenium aquatic criteria for lotic waters is 3.1 micrograms/L/30d. What fraction of this concentration is assimilated into insect tissues before the exit the stream?
