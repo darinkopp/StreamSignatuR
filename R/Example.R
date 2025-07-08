@@ -1,4 +1,4 @@
-# a landscape analysis of aquatic terrestrial subsidies 
+# a landscape analysis of aquatic-terrestrial subsidies 
 rm(list = ls())
 library(fuzzyjoin)
 library(terra)
@@ -9,27 +9,29 @@ library(StreamCatTools)
 library(nhdplusTools)
 library(sf)
 
+# EU Network
+######
 
 eunet <- read_sf("data/EU_Streams/reach_NETRACE_noce.shp")
 eunet$flux <- 1.910
 sub_comids <- eunet[,c("WIDTH_M","flux")]
 colnames(sub_comids)[1:2]<-c("wettedwidth", "flux")
 streamNet<-st_transform(sub_comids, crs=4326)
-#write_sf(sub_comids, data/b)
 
+#####################
 
-streamNet <- st_read("data/blackfootR_50.gpkg")
+streamNet <- st_read("data/blackfootR_50.gpkg", layer = "streamNetwork")
+Catchment <- st_read("data/blackfootR_50.gpkg", layer = "Catchment")
 
 # creating flux raster 
 ######
 #create raster template from watershed
-#bb <- st_bbox(ws)
 bb <- st_bbox(streamNet)
 tmpRas <- rast(xmin = bb$xmin - 0.01, xmax = bb$xmax + 0.01,
                ymin = bb$ymin - 0.01, ymax = bb$ymax + 0.01,
-               nrows = 400, ncols = 400)
-
-v <- vect(sub_comids)
+               nrows = 100, ncols = 100)
+sqrt(cellSize(tmpRas,unit="km"))
+v <- vect(streamNet)
 
 # calculate stream length within raster cell
 l <- rasterizeGeom(v, tmpRas, "length", "m")
@@ -59,31 +61,27 @@ l[l ==0] <- NA
 StrSig <- StreamSignature(r = l, rf = flux, radius_m = 1000)
 StrSig[StrSig==0] <- NA
 
+
 #save stream signature raster
-writeRaster(StrSig, filename = paste0("figures/StreamSignature_EU.tif"))
-
-windows()
-plot(StrSig)
-
-StrSig<-rast(paste0("figures/StreamSignature_EU.tif"))
+#writeRaster(StrSig, filename = paste0("figures/StreamSignature_EU.tif"))
+writeRaster(StrSig, filename = paste0("figures/StreamSignature_Blackfoot.tif"),
+                                      overwrite = T)
 
 
-P1 <- tm_shape(streamNet,bbox = st_bbox(StrSig))+
-  tm_lines(lwd=1.25, col = "blue")+
-  tm_shape(ws)+
-  tm_borders(lwd=1.5)+
-  tm_layout(meta.margins = c(.2, 0, 0, 0))
+StrSig <- rast(paste0("figures/StreamSignature_EU.tif"))
+StrSig <- rast(paste0("figures/StreamSignature_Blackfoot.tif"))
+sqrt(terra::cellSize(StrSig, unit = "m"))
 
 
-plot(StrSig)
+tmap_mode("view")
 P2 <- tm_shape(StrSig, bbox = st_bbox(StrSig)) +
   tm_raster(col.scale = tm_scale_continuous(values = topo.colors(10, rev = T)), 
             col_alpha = 0.75,
             col.legend = tm_legend(title = "gDMyr"))+
-  # tm_shape(streamNet)+
-  # tm_lines(lwd=1.25, col = "blue")+
-  # tm_shape(ws)+
-  # tm_borders(lwd=1.5)+
+   tm_shape(streamNet)+
+   tm_lines(lwd=1.25, col = "blue")+
+   tm_shape(Catchment)+
+   tm_borders(lwd=1.5)+
   tm_layout(meta.margins = c(.2, 0, 0, 0),
             frame = FALSE)+
   tm_basemap("OpenTopoMap")

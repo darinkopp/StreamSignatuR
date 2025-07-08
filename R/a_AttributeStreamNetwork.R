@@ -54,7 +54,8 @@ subset <- subset_nhdplus(comids = as.integer(flowline$UT$nhdplus_comid),
                          nhdplus_data = "download", 
                          flowline_only = FALSE,
                          return_data = TRUE, 
-                         overwrite = TRUE)
+                         overwrite = TRUE)%>%
+  suppressMessages()
 
 flowline <- subset$NHDFlowline_Network
 catchment <- subset$CatchmentSP
@@ -104,3 +105,4 @@ sub_comids$flux <- 1.910
 sub_comids <- sub_comids[,c("wettedwidth", "flux")]
 
 st_write(sub_comids,"data/blackfootR_50.gpkg", layer="streamNetwork")
+st_write(ws,"data/blackfootR_50.gpkg", layer="Catchment")
